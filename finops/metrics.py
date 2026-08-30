@@ -61,3 +61,66 @@ def flag_util_lies(rows, util_threshold: float = 0.90, mfu_threshold: float = 0.
 def idle_waste_usd(idle_hours: float, on_demand_hr: float) -> float:
     """Dollars burned by a GPU left running idle (training done, instance up)."""
     return max(0.0, idle_hours) * max(0.0, on_demand_hr)
+
+
+# ------------------------------------------------------------------- EXT-2
+# Right-sizing by MBU. A GPU is the wrong size when you are renting FLOPs and
+# HBM capacity you never touch — but the replacement still has to sustain the
+# bandwidth and hold the working set, which is why $/GPU-hr alone picks wrong.
+def dollars_per_gb_vram(on_demand_hr: float, hbm_gb: float) -> float:
+    """$/hour per GB of HBM — the capacity price of the rental."""
+    if hbm_gb <= 0:
+        return 0.0
+    return on_demand_hr / hbm_gb
+
+
+def dollars_per_tbs(on_demand_hr: float, peak_bw_tbs: float) -> float:
+    """$/hour per TB/s of memory bandwidth — the price of what decode actually consumes."""
+    if peak_bw_tbs <= 0:
+        return 0.0
+    return on_demand_hr / peak_bw_tbs
+
+
+def rightsize_candidates(
+    catalog_rows,
+    required_bw_tbs: float,
+    required_vram_gb: float,
+    required_tflops: float = 0.0,
+    current_on_demand_hr: float = 0.0,
+    headroom: float = 1.15,
+    exclude: str | None = None,
+):
+    """Cheaper GPUs that still clear the measured bandwidth / VRAM / FLOPs demand.
+
+    `catalog_rows` is an iterable of price-catalog dicts. Requirements are the
+    *achieved* figures from telemetry times `headroom` — you size to the work the
+    GPU is really doing, plus a margin, not to the spec sheet of what it is
+    replacing. Returned cheapest-first.
+    """
+    need_bw = max(0.0, required_bw_tbs) * headroom
+    need_vram = max(0.0, required_vram_gb) * headroom
+    need_flops = max(0.0, required_tflops) * headroom
+    out = []
+    for r in catalog_rows:
+        gtype = r.get("gpu_type")
+        if exclude and gtype == exclude:
+            continue
+        price = float(r.get("on_demand_hr", 0) or 0)
+        bw = float(r.get("peak_bw_tbs", 0) or 0)
+        vram = float(r.get("hbm_gb", 0) or 0)
+        flops = float(r.get("peak_tflops_fp16", 0) or 0)
+        if bw < need_bw or vram < need_vram or flops < need_flops:
+            continue
+        if current_on_demand_hr and price >= current_on_demand_hr:
+            continue
+        out.append({
+            "gpu_type": gtype,
+            "on_demand_hr": price,
+            "peak_bw_tbs": bw,
+            "hbm_gb": vram,
+            "peak_tflops_fp16": flops,
+            "usd_per_gb_vram": round(dollars_per_gb_vram(price, vram), 5),
+            "usd_per_tbs": round(dollars_per_tbs(price, bw), 4),
+            "hourly_saving": round(current_on_demand_hr - price, 4) if current_on_demand_hr else 0.0,
+        })
+    return sorted(out, key=lambda x: x["on_demand_hr"])

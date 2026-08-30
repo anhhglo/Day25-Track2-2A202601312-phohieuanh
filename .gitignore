@@ -1,7 +1,6 @@
+# Chỉ ignore rác môi trường. Toàn bộ outputs/ được nộp kèm bài.
 __pycache__/
 *.pyc
 .pytest_cache/
 .venv/
 venv/
-outputs/*
-!outputs/.gitkeep

@@ -162,3 +162,19 @@ Nộp `outputs/report.md` + `savings.png` + một bài viết ngắn:
 - **Giá thay đổi hàng tháng.** Tất cả số liệu là snapshot tháng 6/2026. Cập nhật lại trước khi áp dụng thực tế.
 - Bài học cốt lõi **bền vững theo thời gian**: đo `$/token`, dùng MFU thay vì GPU-Util, chồng chiết khấu, tính điểm hòa vốn trước khi commit reserved, gắn tag trước khi chargeback.
 - Path graded thuần Python: `pandas`, `matplotlib`, `pytest`. Không cần GPU / API key / Docker.
+
+---
+
+## Bài nộp của sinh viên
+
+| File | Nội dung |
+|---|---|
+| **`outputs/report.md`** | Báo cáo chính: baseline vs. optimized theo `$/1M-token` từng lever, phân tích GPU-Util lie, thứ tự hành động, sustainability, kết quả 5 extension |
+| **`outputs/savings.png`** | Waterfall 4 lever: $18.005 → $8.816/tháng |
+| **`outputs/WRITEUP.md`** | Bài viết ngắn — 5 điều rút ra và những gì mang sang Milestone 2 |
+| **`EXTENSIONS.md`** | Bản đồ 5/5 phần mở rộng "Your Turn": code ở đâu, test nào, số đo được |
+| `outputs/focus_export.csv` | FOCUS export từ M4 |
+
+Trạng thái: `python verify.py` **11/11**, `pytest -q` **33 passed** (15 test gốc giữ nguyên
++ 18 test tự viết trong `tests/test_extensions.py`), **5/5 extension** đã làm và đo.
+Thêm `missions/m6_carbon_scheduling.py` (extension 5) vào `missions/run_all.py`.
