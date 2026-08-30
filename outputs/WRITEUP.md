@@ -1,40 +1,24 @@
-# Hoá đơn GPU nói dối, và bốn con số bắt được nó
+# Hoá đơn GPU nói dối — và cách bắt được nó
 
 *Bài viết ngắn nộp kèm Lab 25 — GPU FinOps · Track 2 · Day 25*
+*Toàn bộ số liệu sinh từ `python missions/run_all.py`, dữ liệu seed cố định (seed 25), giá snapshot tháng 6/2026.*
 
 ---
 
-Chỗ tốn kém nhất trong hoá đơn GPU của NimbusAI không phải là giá thuê. Giá thuê thì ai
-cũng nhìn thấy: $2,50/giờ cho một H100, nhân với số giờ, ra một con số ai cũng đọc được.
-Chỗ tốn kém là **những thứ mà cách đo hiện tại về mặt cấu trúc không thể nhìn thấy** — và
-sau khi chạy hết năm mission của lab này, tôi cho rằng đó mới là bài học đáng mang đi.
+## 1. Baseline vs. Optimized
 
-Con số cuối cùng: **$18.005 → $8.816 mỗi tháng, giảm 51%**. Nhưng con số làm tôi đổi cách
-nghĩ không nằm ở đó.
+| | Baseline | Optimized | Tiết kiệm |
+|---|---:|---:|---:|
+| Tổng chi phí GPU | **$18.005/tháng** | **$8.816/tháng** | **51,0%** |
+| Đơn giá inference | **$6,488 /1M-token** | **$1,127 /1M-token** | **82,6%** |
 
-## 1. `nvidia-smi` đo sai thứ, và nó sai theo hướng có lợi cho người bán
+Chia theo bốn lever: Purchasing $6.315 (69%) · Inference $1.211 (13%) · Right-size $1.063 (12%) ·
+Tắt GPU nhàn rỗi $600 (7%).
 
-`gpu-h100-4` báo **98,2% GPU-Util**. Theo mọi dashboard hạ tầng thông thường, đó là một
-con máy khoẻ mạnh, đang được khai thác tối đa, không có gì để tối ưu. MFU của nó là
-**0,194**.
+## 2. Đòn bẩy nào đóng góp nhiều nhất, và tại sao
 
-Nguyên nhân nằm ở định nghĩa: GPU-Util là *tỷ lệ cửa sổ lấy mẫu có ít nhất một kernel đang
-nằm trên thiết bị*. Một kernel đứng chờ đọc HBM suốt vòng đời của nó vẫn "đang nằm trên
-thiết bị" đủ 100% thời gian. Bộ đếm đo **thời gian chiếm clock**, không đo việc làm được.
-Nó không hỏng — nó trả lời một câu hỏi khác với câu hỏi ta tưởng mình đang hỏi.
-
-Cái giá thì rất cụ thể. `gpu-h100-4` và `gpu-h100-3` là hai con H100 giống hệt nhau, cùng
-thuê $2,50/giờ, cùng **$1.800/tháng**. Một con đạt MFU 0,427, con kia 0,194 — **đắt gấp
-2,2 lần trên mỗi đơn vị compute thật sự làm ra**. Trên hoá đơn, hai dòng đó *y hệt nhau*.
-
-Không có mẹo tối ưu nào cứu được chuyện này, vì vấn đề không nằm ở mức tối ưu mà ở **mẫu
-số**. Chừng nào còn báo cáo bằng $/GPU-hr, sự khác biệt 2,2 lần này là vô hình theo đúng
-nghĩa toán học. Đổi mẫu số sang $/1M-token thì nó hiện ra ngay ở dòng đầu tiên.
-
-## 2. Lever lớn nhất của inference không phải là chiết khấu
-
-Đây là chỗ tôi đoán sai trước khi chạy số. Tôi nghĩ batch API (−50%) và prompt caching
-(−90% trên phần cache) sẽ là hai lever chính. Sổ chi tiết theo $/1M-token nói ngược lại:
+**Về tiền tuyệt đối, purchasing thắng ($6.315/tháng).** Nhưng con số dạy được nhiều hơn nằm ở
+sổ chi tiết inference:
 
 | Giai đoạn | $/1M-token | Tiết kiệm luỹ kế |
 |---|---:|---:|
@@ -43,80 +27,91 @@ nghĩa toán học. Đổi mẫu số sang $/1M-token thì nó hiện ra ngay �
 | + Prompt cache | 1,365 | 79,0% |
 | + Batch API | 1,127 | 82,6% |
 
-**Cascade một mình gánh 76,5 trong 82,6 điểm phần trăm.** Cache và batch cộng lại thêm
-6,1 điểm. Lý do rất đơn giản khi đã nhìn thấy: chiết khấu tác động lên *giá*, còn định
-tuyến tác động lên *việc có phải trả cái giá đó hay không*. 80% traffic ở đây chưa bao giờ
-cần tới model frontier; gửi nó tới đó rồi xin giảm 50% vẫn đắt hơn nhiều so với không gửi.
+**Cascade một mình gánh 76,5 trong 82,6 điểm phần trăm**; cache và batch cộng lại chỉ thêm 6,1.
+Tôi đã đoán ngược trước khi chạy số — cứ nghĩ batch (−50%) và cache (−90%) sẽ là hai lever chính.
 
-Hệ quả về thứ tự làm việc: **định tuyến trước, thương lượng chiết khấu sau.** Chiết khấu là
-thứ nhân với một con số; định tuyến là thứ quyết định con số ấy là bao nhiêu.
+Lý do rất đơn giản khi đã nhìn thấy: **chiết khấu tác động lên *giá*, định tuyến tác động lên
+việc có phải trả cái giá đó hay không.** 80% traffic ở đây chưa bao giờ cần tới model frontier;
+gửi nó tới đó rồi xin giảm 50% vẫn đắt hơn nhiều so với không gửi. Hệ quả về thứ tự làm việc:
+**định tuyến trước, thương lượng chiết khấu sau.** Cũng vì cascade đã kéo giá input xuống trước,
+lever cache còn lại chỉ đáng $36/tháng — 90% của một khoản đã nhỏ đi 15 lần thì vẫn là khoản nhỏ.
 
-Cũng chính vì cascade đã kéo giá input xuống trước, lever cache còn lại chỉ đáng
-**$36/tháng** — chứ không phải con số "−90%" trên tờ quảng cáo. Chiết khấu 90% trên một
-khoản đã nhỏ đi 15 lần thì vẫn chỉ là 90% của một khoản nhỏ.
+## 3. GPU-Util Lie: GPU nào, và mất bao nhiêu tiền
 
-## 3. Cache không miễn phí, và ngưỡng hoà vốn là một phép chia
+**`gpu-h100-4`: 98,2% GPU-Util nhưng MFU chỉ 0,194.** (Trình phát hiện bắt thêm `gpu-a10g-1`:
+96,9% util, MFU 0,268.)
 
-Phần mở rộng tôi thấy đắt giá nhất về mặt tư duy là `cache_is_worth_it()`. Ghi một prefix
-vào cache bị tính **cao hơn** giá input thường (1,25× ở tier 5 phút, 2,00× ở tier 1 giờ);
-chỉ những lần đọc lại mới trả khoản chênh đó về. Vậy:
+Cơ chế nằm ở định nghĩa: GPU-Util là *tỷ lệ cửa sổ lấy mẫu có ít nhất một kernel đang nằm trên
+thiết bị*. Một kernel đứng chờ đọc HBM suốt vòng đời vẫn "đang nằm trên thiết bị" đủ 100% thời
+gian, nên ghi ra con số giống hệt một kernel làm bão hoà tensor core. Bộ đếm đo **thời gian chiếm
+clock**, không đo việc làm được. Arithmetic intensity đo được là 248 FLOP/byte, dưới ridge point
+295 của H100 → workload memory-bound, tensor core ngồi không giữa các lần nạp toán hạng.
 
-> số lần đọc hoà vốn = (write_multiplier − 1) / (1 − read_discount)
+**Tác động tài chính:** `gpu-h100-4` và `gpu-h100-3` là hai con H100 giống hệt nhau, cùng thuê
+$2,50/giờ, cùng **$1.800/tháng**. Một con đạt MFU 0,427, con kia 0,194 — **đắt gấp 2,2 lần trên
+mỗi đơn vị compute thật sự làm ra**, mà trên hoá đơn hai dòng đó *y hệt nhau*. Chừng nào còn báo
+cáo bằng $/GPU-hr, khác biệt 2,2 lần này vô hình theo đúng nghĩa toán học.
 
-Tier 5 phút cần **0,28 lần đọc**; tier 1 giờ cần **1,11 lần**. Một cache entry được ghi rồi
-không bao giờ đọc lại thì **đắt hơn là không cache** — đó chính là cách một TTL 5 phút đặt
-trên tuyến traffic thưa lặng lẽ làm mất tiền, trong khi mọi dashboard đều báo "cache đang
-bật".
+## 4. Năm phần mở rộng đã làm
 
-Đo trên dữ liệu thật của lab (dựng lại từ timestamp: mỗi khoảng trống dài hơn TTL buộc ghi
-lại một lần), cả 4 team đều vượt ngưỡng rất xa — tuyến mỏng nhất là `eval` với 4,3 lần đọc
-mỗi lần ghi. Nhưng kết quả thú vị là **tier 1 giờ thắng ở cả 4 team dù ghi đắt hơn 60%**,
-vì nó bóp số lần ghi của team `assistant` từ 39 xuống còn 1. Ngưỡng hoà vốn cao hơn, nhưng
-số lần phải trả ngưỡng đó giảm mạnh hơn.
+**Ext 1 — `recommend_tier()` v2.** Thêm ba yếu tố: tỷ lệ thu hồi spot theo loại GPU (B200 12%/h →
+L4 1,5%/h, quy ra "thuế gián đoạn" 1,07 giờ hoá đơn cho 1 giờ việc hữu ích ở H100); duty cycle
+tính **theo tháng** vì reserved bị tính 24×30 giờ dù dùng hay không; và chọn 1yr vs 3yr qua ngưỡng
+hoà vốn xác suất workload còn sống p\* = r3/r1 (H100 40%, A100 43%, B200 52%).
+*Kết quả:* trên 8 job của fleet, hai chính sách chọn **cùng** tier → tổng không đổi. Tôi giữ nguyên
+kết quả âm tính này. Khác biệt lộ ra trên lưới 112 ô: **v1 chọn sai ở 21 ô, chi vượt $5.231/tháng**,
+luôn cùng một dạng — cam kết reserved cho job chỉ chạy nửa số ngày trong tháng.
 
-## 4. Reasoning: 8% traffic, 16% tiền, 94% điện
+**Ext 2 — Right-size theo MBU.** Chỉ đổi GPU khi lãng phí **cả** FLOPs (MFU<0,30) lẫn băng thông
+(MBU<0,50), rồi chọn máy theo nhu cầu đo được +15% headroom. *Kết quả:* **$1.063/tháng** trên 4 GPU.
 
-Traffic reasoning chiếm **8,4% số request**, **16,4% chi phí** — và **94% năng lượng**
-inference. Nó trả giá hai lần: sinh ra gấp 6 lần token (3.875 so với 641 output token), và
-mỗi token đó là một bước decode memory-bound trên model cỡ frontier ở batch nhỏ. Hai hệ số
-nhân với nhau.
+**Ext 3 — `cache_is_worth_it()`.** Ghi vào cache bị tính **cao hơn** giá input thường; ngưỡng hoà
+vốn = (write_multiplier−1)/(1−read_discount) → **0,28 lần đọc** ở tier 5 phút, **1,11** ở tier 1 giờ.
+*Kết quả:* đo từ timestamp thật, cả 4 team đều vượt xa (mỏng nhất là `eval` với 4,3 đọc/ghi). Nhưng
+**tier 1 giờ thắng cả 4 team dù ghi đắt hơn 60%**, vì nó bóp số lần ghi của `assistant` từ 39 xuống 1.
 
-Điều đáng nói: theo đề bài, trần 10% traffic **không có hiệu lực** — chúng tôi đã ở dưới
-mức đó rồi, nên đặt trần tiết kiệm đúng $0. Tôi giữ nguyên kết quả âm tính này trong báo
-cáo thay vì chỉnh ngưỡng cho ra một con số đẹp. Lever thật sự có hiệu lực là *lọc theo điều
-kiện kích hoạt* — chỉ bật extended thinking khi có tín hiệu đo được — và giảm một nửa lượng
-reasoning tiết kiệm $11/tháng cùng **14.734 Wh/ngày**. Phần tiền là nhiễu; phần điện thì
-không. Đây là chỗ duy nhất trong cả lab mà **$ và Wh nói hai câu khác nhau**, và nếu chỉ
-theo dõi $ thì sẽ không bao giờ thấy.
+**Ext 4 — Ngân sách reasoning.** *Kết quả:* 8,4% request → 16,4% tiền → **94% năng lượng**. Trần 10%
+**không có hiệu lực** (traffic đã dưới ngưỡng, tiết kiệm đúng $0) — giữ nguyên kết quả âm tính này.
 
-## 5. Ràng buộc kỹ thuật quyết định, tỷ số chỉ để sàng lọc
+**Ext 5 — Lập lịch theo carbon.** Chỉ 5 job `interruptible=1` (2.057 kWh/tháng) là di chuyển được;
+1.918 kWh/tháng inference bị ghim bởi độ trễ. *Kết quả:* chuyển sang `europe-north1` tránh
+**720 kgCO2e/tháng (92%)** với +95 ms mà không người dùng nào cảm nhận. Bẫy: `europe-central2` là
+vùng châu Âu *gần nhất* nhưng bẩn nhất (660 gCO2/kWh) — chọn theo phản xạ "gần thì tốt" tăng 74%
+phát thải.
 
-Bài học cuối đến từ phần right-sizing. L4 là card rẻ nhất catalog ($0,80/giờ). Nó không
-chạy nổi bất kỳ workload nào trong danh sách cần thay máy: 0,30 TB/s so với nhu cầu đo được
-1,04 TB/s, 24 GB so với working set 77 GB. Chọn nó thì **$/GPU-hr giảm còn $/1M-token
-tăng** — đúng cái nghịch lý mà cả lab này được xây để dạy.
+### Insight quan trọng nhất
 
-Ngược lại, MI300X đắt hơn A100 tính theo giờ ($1,95 so với $1,79) nhưng là **băng thông rẻ
-nhất catalog** ($0,368/TB-s so với $0,895/TB-s). Với decode — vốn memory-bound — đó mới là
-mẫu số đúng. Quy trình cuối cùng tôi dùng: **$/TB-s và $/GB-VRAM để xếp hạng, ràng buộc đo
-được để loại, rồi mới lấy con rẻ nhất còn sống sót.** Tỷ số là công cụ sàng lọc; ràng buộc
-là cổng cứng.
+**Ràng buộc kỹ thuật quyết định, tỷ số chỉ để sàng lọc.** L4 là card rẻ nhất catalog ($0,80/giờ) và
+không chạy nổi workload nào cần thay máy: 0,30 TB/s so với nhu cầu 1,04 TB/s, 24 GB so với working
+set 77 GB. Chọn nó thì **$/GPU-hr giảm còn $/1M-token tăng** — đúng nghịch lý cả lab này được xây để
+dạy. Ngược lại MI300X đắt hơn A100 theo giờ nhưng là băng thông rẻ nhất catalog ($0,368 so với
+$0,895 /TB-s). Quy trình đúng: **$/TB-s và $/GB-VRAM để xếp hạng, ràng buộc đo được để loại, rồi mới
+lấy con rẻ nhất còn sống sót.**
+
+## 5. Nếu tôi là FinOps lead của NimbusAI: ba hành động đầu tiên
+
+**1. Đổi mẫu số của mọi báo cáo chi phí sang $/1M-token, và đưa MFU/MBU vào chính báo cáo đó.**
+*Tuần 1, không tốn hạ tầng.* Đây phải là việc đầu tiên vì nó là điều kiện để nhìn thấy ba việc còn
+lại. Chừng nào MFU nằm ở dashboard hạ tầng còn chi phí nằm ở dashboard tài chính thì `gpu-h100-4`
+— 2,2 lần lãng phí trên một dòng hoá đơn bình thường — sẽ còn vô hình.
+
+**2. Bật cascade routing, và tắt GPU nhàn rỗi.** *Tuần 1–2, $1.722/tháng.* Không phải vì lớn nhất,
+mà vì **đảo ngược được trong một buổi chiều**. Cascade gánh 76,5% tiết kiệm inference; tắt GPU nhàn
+rỗi là lãng phí thuần tuý không có đánh đổi nào để tranh luận. Hai việc rẻ nhất về mặt rủi ro nên
+đi trước để lấy đà chính trị cho việc thứ ba.
+
+**3. Sửa hiệu quả xong RỒI mới ký hợp đồng mua dài hạn.** *Tuần 3+, $6.315/tháng.* Purchasing là
+con số lớn nhất nhưng tôi cố tình xếp cuối: một reservation 3 năm ký trên nền job đang chạy MFU
+0,19 là **khoá chặt phần lãng phí đó trong ba năm**. Right-size và commit đều là hành động đóng
+băng mức hiệu quả hôm nay vào hoá đơn. Và trước khi ký, dùng ngưỡng hoà vốn survival: dưới 40% tự
+tin workload sống đủ 3 năm thì giá 1 năm mới là giá *kỳ vọng* rẻ hơn, dù giá niêm yết cao hơn.
+
+> **Một câu tóm tắt cho ban lãnh đạo:** đổi mẫu số trước, làm việc rẻ và đảo ngược được trước, ký
+> hợp đồng sau cùng — vì ba việc đầu sửa được, việc thứ tư thì không.
 
 ---
 
-## Thứ tôi sẽ mang sang Milestone 2
-
-1. **Không bao giờ báo cáo hạ tầng AI bằng $/GPU-hr.** Mẫu số phải là đơn vị công việc —
-   $/1M-token, $/request, $/tài liệu xử lý. $/GPU-hr trả lời câu "ta đã thuê bao nhiêu",
-   không trả lời câu "ta trả bao nhiêu cho mỗi thứ làm ra".
-2. **Sửa hiệu quả trước khi ký hợp đồng.** Một reservation 3 năm ký trên nền job chạy MFU
-   0,19 là khoá chặt phần lãng phí đó trong ba năm. Cascade và tắt GPU nhàn rỗi đảo ngược
-   được trong một buổi chiều; cam kết dung lượng thì không.
-3. **Đưa MFU/MBU vào chính báo cáo chi phí, không để riêng ở dashboard hạ tầng.** Chừng nào
-   hai thứ đó còn nằm ở hai màn hình khác nhau thì `gpu-h100-4` sẽ còn vô hình.
-4. **Báo cáo cả kết quả âm tính.** Trần reasoning 10% không tiết kiệm được gì; hai chính
-   sách mua trùng nhau trên cả 8 job của fleet. Giữ nguyên những chỗ đó làm phần còn lại
-   của báo cáo đáng tin hơn, chứ không kém đi.
-
-*Toàn bộ số liệu sinh ra từ `python missions/run_all.py`; dữ liệu tổng hợp seed cố định
-(seed 25). Giá là snapshot tháng 6/2026.*
+*Ghi chú về phương pháp: hai kết quả âm tính (trần reasoning 10% không có hiệu lực; hai chính sách
+mua trùng nhau trên cả 8 job) được giữ nguyên trong báo cáo thay vì chỉnh ngưỡng cho ra số đẹp. Phần
+caveat trong `outputs/report.md` nói rõ chỗ hai rổ chi phí — telemetry 11 GPU và catalogue 8 job —
+không đối chiếu về cùng một hoá đơn.*
